@@ -2,23 +2,25 @@
 name = "{{{packageName}}}"
 version = "{{{packageVersion}}}"
 authors = ["OpenAPI Generator team and contributors"]
+edition = "2018"
 
 [dependencies]
-serde = "^1.0"
-serde_derive = "^1.0"
+async-trait = { version = "0.1" }
+serde = { version = "^1.0", features = ["derive"] }
 serde_json = "^1.0"
-url = "1.5"
+url = "2.1"
 {{#hyper}}
-hyper = "~0.11"
+http = "0.1"
+hyper = "0.13.0-alpha.1"
 serde_yaml = "0.7"
-base64 = "~0.7.0"
-futures = "0.1.23"
+base64 = "0.7"
+futures-preview = { version = "0.3.0-alpha.19", features = ["async-await"] }
 {{/hyper}}
 {{#reqwest}}
-reqwest = "~0.9"
+reqwest = { version = "0.10.0-alpha.1" }
 {{/reqwest}}
 
 [dev-dependencies]
 {{#hyper}}
-tokio-core = "*"
+tokio = "0.2.0-alpha.6"
 {{/hyper}}

@@ -1,4 +1,5 @@
 {{>partial_header}}
+use async_trait::async_trait;
 use std::rc::Rc;
 use std::borrow::Borrow;
 #[allow(unused_imports)]
@@ -6,16 +7,15 @@ use std::option::Option;
 
 use hyper;
 use serde_json;
-use futures::Future;
 
 use super::{Error, configuration};
 use super::request as __internal_request;
 
-pub struct {{{classname}}}Client<C: hyper::client::Connect> {
+pub struct {{{classname}}}Client<C: hyper::client::connect::Connect> {
     configuration: Rc<configuration::Configuration<C>>,
 }
 
-impl<C: hyper::client::Connect> {{{classname}}}Client<C> {
+impl<C: hyper::client::connect::Connect> {{{classname}}}Client<C> {
     pub fn new(configuration: Rc<configuration::Configuration<C>>) -> {{{classname}}}Client<C> {
         {{{classname}}}Client {
             configuration,
@@ -23,18 +23,20 @@ impl<C: hyper::client::Connect> {{{classname}}}Client<C> {
     }
 }
 
+#[async_trait]
 pub trait {{{classname}}} {
 {{#operations}}
 {{#operation}}
-    fn {{{operationId}}}(&self, {{#allParams}}{{{paramName}}}: {{^required}}Option<{{/required}}{{#required}}{{#isNullable}}Option<{{/isNullable}}{{/required}}{{#isString}}&str{{/isString}}{{#isUuid}}&str{{/isUuid}}{{^isString}}{{^isUuid}}{{^isPrimitiveType}}{{^isContainer}}crate::models::{{/isContainer}}{{/isPrimitiveType}}{{{dataType}}}{{/isUuid}}{{/isString}}{{^required}}>{{/required}}{{#required}}{{#isNullable}}>{{/isNullable}}{{/required}}{{#hasMore}}, {{/hasMore}}{{/allParams}}) -> Box<dyn Future<Item = {{^returnType}}(){{/returnType}}{{#returnType}}{{{returnType}}}{{/returnType}}, Error = Error<serde_json::Value>>>;
+    async fn {{{operationId}}}(&self, {{#allParams}}{{{paramName}}}: {{^required}}Option<{{/required}}{{#required}}{{#isNullable}}Option<{{/isNullable}}{{/required}}{{#isString}}&str{{/isString}}{{#isUuid}}&str{{/isUuid}}{{^isString}}{{^isUuid}}{{^isPrimitiveType}}{{^isContainer}}crate::models::{{/isContainer}}{{/isPrimitiveType}}{{{dataType}}}{{/isUuid}}{{/isString}}{{^required}}>{{/required}}{{#required}}{{#isNullable}}>{{/isNullable}}{{/required}}{{#hasMore}}, {{/hasMore}}{{/allParams}}) -> Result<{{^returnType}}(){{/returnType}}{{#returnType}}{{{returnType}}}{{/returnType}}, Error<serde_json::Value>;
 {{/operation}}
 {{/operations}}
 }
 
-impl<C: hyper::client::Connect>{{{classname}}} for {{{classname}}}Client<C> {
+#[async_trait]
+impl<C: hyper::client::connect::Connect>{{{classname}}} for {{{classname}}}Client<C> {
 {{#operations}}
 {{#operation}}
-    fn {{{operationId}}}(&self, {{#allParams}}{{{paramName}}}: {{^required}}Option<{{/required}}{{#required}}{{#isNullable}}Option<{{/isNullable}}{{/required}}{{#isString}}&str{{/isString}}{{#isUuid}}&str{{/isUuid}}{{^isString}}{{^isUuid}}{{^isPrimitiveType}}{{^isContainer}}crate::models::{{/isContainer}}{{/isPrimitiveType}}{{{dataType}}}{{/isUuid}}{{/isString}}{{^required}}>{{/required}}{{#required}}{{#isNullable}}>{{/isNullable}}{{/required}}{{#hasMore}}, {{/hasMore}}{{/allParams}}) -> Box<dyn Future<Item = {{^returnType}}(){{/returnType}}{{#returnType}}{{{.}}}{{/returnType}}, Error = Error<serde_json::Value>>> {
+    async fn {{{operationId}}}(&self, {{#allParams}}{{{paramName}}}: {{^required}}Option<{{/required}}{{#required}}{{#isNullable}}Option<{{/isNullable}}{{/required}}{{#isString}}&str{{/isString}}{{#isUuid}}&str{{/isUuid}}{{^isString}}{{^isUuid}}{{^isPrimitiveType}}{{^isContainer}}crate::models::{{/isContainer}}{{/isPrimitiveType}}{{{dataType}}}{{/isUuid}}{{/isString}}{{^required}}>{{/required}}{{#required}}{{#isNullable}}>{{/isNullable}}{{/required}}{{#hasMore}}, {{/hasMore}}{{/allParams}}) -> Result<{{^returnType}}(){{/returnType}}{{#returnType}}{{{.}}}{{/returnType}}, Error<serde_json::Value> {
         let mut req = __internal_request::Request::new(hyper::Method::{{{httpMethod}}}, "{{{path}}}".to_string())
         {{#hasAuthMethods}}
         {{#authMethods}}
@@ -159,7 +161,7 @@ impl<C: hyper::client::Connect>{{{classname}}} for {{{classname}}}Client<C> {
         req = req.returns_nothing();
         {{/returnType}}
 
-        req.execute(self.configuration.borrow())
+        req.execute(self.configuration.borrow()).await
     }
 
 {{/operation}}

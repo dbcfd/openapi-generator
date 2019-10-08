@@ -8,6 +8,7 @@ pub enum Error<T> {
     Hyper(hyper::Error),
     Serde(serde_json::Error),
     ApiError(ApiError<T>),
+    HttpError(http::Error),
 }
 
 #[derive(Debug)]

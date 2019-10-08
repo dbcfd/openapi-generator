@@ -100,7 +100,7 @@ impl Request {
         conf: &configuration::Configuration<C>,
     ) -> Box<dyn Future<Item = U, Error = Error<serde_json::Value>> + 'a>
     where
-        C: hyper::client::Connect,
+        C: hyper::client::connect::Connect,
         U: Sized + 'a,
         for<'de> U: serde::Deserialize<'de>,
     {

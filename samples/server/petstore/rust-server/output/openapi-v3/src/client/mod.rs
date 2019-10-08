@@ -174,7 +174,7 @@ impl Client<hyper::client::FutureResponse> {
         )
     }
 
-    /// Create a client with a custom implementation of hyper::client::Connect.
+    /// Create a client with a custom implementation of hyper::client::connect::Connect.
     ///
     /// Intended for use with custom implementations of connect for e.g. protocol logging
     /// or similar functionality which requires wrapping the transport layer. When wrapping a TCP connection,
@@ -189,7 +189,7 @@ impl Client<hyper::client::FutureResponse> {
     /// * `handle` - tokio reactor handle to use for execution
     /// * `base_path` - base path of the client API, i.e. "www.my-api-implementation.com"
     /// * `protocol` - Which protocol to use when constructing the request url, e.g. `Some("http")`
-    /// * `connector_fn` - Function which returns an implementation of `hyper::client::Connect`
+    /// * `connector_fn` - Function which returns an implementation of `hyper::client::connect::Connect`
     pub fn try_new_with_connector<C>(
         handle: Handle,
         base_path: &str,
@@ -197,7 +197,7 @@ impl Client<hyper::client::FutureResponse> {
         connector_fn: Box<dyn Fn(&Handle) -> C + Send + Sync>,
     ) -> Result<Client<hyper::client::FutureResponse>, ClientInitError>
     where
-        C: hyper::client::Connect + hyper::client::Service,
+        C: hyper::client::connect::Connect + hyper::client::Service,
     {
         let connector = connector_fn(&handle);
         let client_service = Box::new(hyper::Client::configure().connector(connector).build(

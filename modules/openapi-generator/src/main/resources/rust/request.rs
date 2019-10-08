@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use super::{configuration, Error};
-use futures;
-use futures::{Future, Stream};
+use futures::Stream;
 use hyper;
 use hyper::header::UserAgent;
 use serde;
@@ -95,10 +94,10 @@ impl Request {
         self
     }
 
-    pub fn execute<'a, C, U>(
+    pub async fn execute<'a, C, U>(
         self,
         conf: &configuration::Configuration<C>,
-    ) -> Box<Future<Item = U, Error = Error<serde_json::Value>> + 'a>
+    ) -> Result<U, Error<serde_json::Value>>
     where
         C: hyper::client::Connect,
         U: Sized + 'a,
@@ -201,39 +200,30 @@ impl Request {
         }
 
         let no_ret_type = self.no_return_type;
-        let res = conf.client
+        let resp = conf.client
                 .request(req)
-                .map_err(|e| Error::from(e))
-                .and_then(|resp| {
-                    let status = resp.status();
-                    resp.body()
-                        .concat2()
-                        .and_then(move |body| Ok((status, body)))
-                        .map_err(|e| Error::from(e))
-                })
-                .and_then(|(status, body)| {
-                    if status.is_success() {
-                        Ok(body)
-                    } else {
-                        Err(Error::from((status, &*body)))
-                    }
-                });
-        Box::new(
-            res
-                .and_then(move |body| {
-                    let parsed: Result<U, _> = if no_ret_type {
-                        // This is a hack; if there's no_ret_type, U is (), but serde_json gives an
-                        // error when deserializing "" into (), so deserialize 'null' into it
-                        // instead.
-                        // An alternate option would be to require U: Default, and then return
-                        // U::default() here instead since () implements that, but then we'd
-                        // need to impl default for all models.
-                        serde_json::from_str("null")
-                    } else {
-                        serde_json::from_slice(&body)
-                    };
-                    parsed.map_err(|e| Error::from(e))
-                })
-        )
+                .await
+                .map_err(|e| Error::from(e))?
+        let status = resp.status();
+        let mut body = vec![];
+        for chunk in resp.body_mut().next().await {
+            let chunk = chunk.map_err(|e| Error::from(e))?;
+            body.extend(chunk.into_bytes());
+        }
+        if !status.is_success() {
+            return Err(Error::from((status, &*body)));
+        }
+        let parsed: Result<U, _> = if no_ret_type {
+            // This is a hack; if there's no_ret_type, U is (), but serde_json gives an
+            // error when deserializing "" into (), so deserialize 'null' into it
+            // instead.
+            // An alternate option would be to require U: Default, and then return
+            // U::default() here instead since () implements that, but then we'd
+            // need to impl default for all models.
+            serde_json::from_str("null")
+        } else {
+            serde_json::from_slice(&body)
+        };
+        parsed.map_err(|e| Error::from(e))
     }
 }

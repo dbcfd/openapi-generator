@@ -1,10 +1,10 @@
 {{>partial_header}}
+use std::future::Future;
 use std::rc::Rc;
 use std::borrow::Borrow;
 
 use hyper;
 use serde_json;
-use futures::Future;
 
 use super::{Error, configuration};
 use super::request as __internal_request;

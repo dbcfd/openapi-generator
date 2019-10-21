@@ -4,6 +4,7 @@ use super::{configuration, Error};
 use hyper;
 use serde;
 use serde_json;
+use std::sync::Arc;
 
 pub(crate) struct ApiKey {
     pub in_header: bool,
@@ -93,14 +94,17 @@ impl Request {
 
     pub async fn execute<'a, C, U>(
         self,
-        conf: &configuration::Configuration<C>,
+        conf: Arc<configuration::Configuration<C>>,
     ) -> Result<U, Error<serde_json::Value>>
     where
-        C: hyper::client::connect::Connect,
+        C: hyper::client::connect::Connect + 'static,
         U: Sized + 'a,
         for<'de> U: serde::Deserialize<'de>,
     {
-        let mut query_string = ::url::form_urlencoded::Serializer::new("".to_owned());
+        //TODO: Safe replacement for this
+        let mut query_string: Vec<String> = self.query_params.iter().map(|t| {
+            format!("{}={}", t.0, t.1)
+        }).collect();
 
         let mut path = self.path;
         for (k, v) in self.path_params {
@@ -114,16 +118,12 @@ impl Request {
             req.header(&k, v);
         }
 
-        for (key, val) in self.query_params {
-            query_string.append_pair(&key, &val);
-        }
-
         match self.auth {
             Auth::ApiKey(apikey) => {
                 if let Some(ref key) = conf.api_key {
                     let val = apikey.key(&key.prefix, &key.key);
                     if apikey.in_query {
-                        query_string.append_pair(&apikey.param_name, &val);
+                        query_string.push(format!("{}={}", apikey.param_name, val));
                     }
                     if apikey.in_header {
                         req.header(&apikey.param_name, val);
@@ -151,14 +151,14 @@ impl Request {
 
         let mut uri_str = format!("{}{}", conf.base_path, path);
 
-        let query_string_str = query_string.finish();
-        if query_string_str != "" {
+        let query_string = urlencoding::encode(&query_string.join("&"));
+        if !query_string.is_empty() {
             uri_str += "?";
-            uri_str += &query_string_str;
+            uri_str += &query_string;
         }
         let uri: hyper::Uri = match uri_str.parse() {
             Err(e) => {
-                return Err(Error::UriError(e));
+                return Err(Error::InvalidUriError(e));
             }
             Ok(u) => u,
         };
@@ -191,9 +191,13 @@ impl Request {
                 .await
                 .map_err(|e| Error::from(e))?;
         let status = resp.status();
-        let body = resp.body().into_bytes().await;
+        let mut bytes = vec![];
+        let mut body = resp.into_body();
+        while let Some(c) = body.next().await {
+            bytes.extend(c?.to_vec());
+        }
         if !status.is_success() {
-            return Err(Error::from((status, &*body)));
+            return Err(Error::from((status, bytes.as_slice())));
         }
         let parsed: Result<U, _> = if no_ret_type {
             // This is a hack; if there's no_ret_type, U is (), but serde_json gives an
@@ -204,7 +208,7 @@ impl Request {
             // need to impl default for all models.
             serde_json::from_str("null")
         } else {
-            serde_json::from_slice(&body)
+            serde_json::from_slice(bytes.as_slice())
         };
         parsed.map_err(|e| Error::from(e))
     }

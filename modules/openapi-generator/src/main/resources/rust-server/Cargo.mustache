@@ -10,8 +10,8 @@ edition = "2018"
 
 [features]
 default = ["client", "server"]
-client = [{{#usesUrlEncodedForm}}"serde_urlencoded", {{/usesUrlEncodedForm}}"serde_ignored", "hyper", "hyper-tls", "native-tls", "openssl", "tokio", "url"]
-server = ["serde_ignored", "hyper", "hyper-tls", "native-tls", "openssl", "tokio", "tokio-proto", "tokio-tls", "regex", "percent-encoding", "url"]
+client = [{{#usesUrlEncodedForm}}"serde_urlencoded", {{/usesUrlEncodedForm}}"serde_ignored", "hyper", "hyper-tls", "native-tls", "openssl", "tokio-net", "url"]
+server = ["serde_ignored", "hyper", "hyper-tls", "native-tls", "openssl", "tokio-net", "tokio-codec", "tokio-tls", "regex", "percent-encoding", "url"]
 conversion = ["frunk", "frunk_derives", "frunk_core", "frunk-enum-core", "frunk-enum-derive"]
 
 [dependencies]
@@ -38,7 +38,7 @@ serde-xml-rs = {git = "git://github.com/Metaswitch/serde-xml-rs.git" , branch = 
 {{/usesXml}}
 
 # Common between server and client features
-async-trait { version = "0.1" }
+async-trait = { version = "0.1" }
 hyper = {version = "0.13.0-alpha.1", optional = true}
 hyper-tls = {version = "0.4.0-alpha.1", optional = true}
 native-tls = {version = "0.2", optional = true}
@@ -53,8 +53,8 @@ url = {version = "2.1", optional = true}
 # Server-specific
 percent-encoding = {version = "1.0.0", optional = true}
 regex = {version = "0.2", optional = true}
-tokio-proto = {version = "0.2.0-alpha.6", optional = true}
-tokio-tls = {version = "0.3.0-alpha.6", optional = true, features = ["tokio-proto"]}
+tokio-codec = {version = "0.2.0-alpha.6", optional = true}
+tokio-tls = {version = "0.3.0-alpha.6", optional = true}
 
 # Other optional crates
 frunk = { version = "0.3.0", optional = true }

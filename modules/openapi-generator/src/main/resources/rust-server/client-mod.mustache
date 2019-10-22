@@ -30,10 +30,18 @@ use swagger;
 
 use swagger::{ApiError, XSpanId, XSpanIdString, Has, AuthData};
 
-use {Api{{#apiInfo}}{{#apis}}{{#operations}}{{#operation}},
-     {{{operationId}}}Response{{/operation}}{{/operations}}{{/apis}}{{/apiInfo}}
-     };
-use models;
+use crate::Api;
+use crate::models::{
+    self
+    {{#apiInfo}}
+    {{#apis}}
+    {{#operations}}
+    {{#operation}},
+    {{{operationId}}}Response{{/operation}}
+    {{/operations}}
+    {{/apis}}
+    {{/apiInfo}}
+ };
 
 define_encode_set! {
     /// This encode set is used for object IDs
@@ -64,7 +72,7 @@ fn into_base_path(input: &str, correct_scheme: Option<&'static str>) -> Result<S
 
 /// A client that implements the API by making HTTP calls out to a server.
 pub struct Client<F> where
-  F: Future<Result=<hyper::Response, hyper::Error>> + 'static {
+  F: Future<Output=Result<hyper::Response, hyper::Error>> + 'static {
     client_service: Arc<Box<hyper::client::Service<Request=hyper::Request<hyper::Body>, Response=hyper::Response, Error=hyper::Error, Future=F>>>,
     base_path: String,
 }
@@ -230,7 +238,7 @@ impl<F, C> Api<C> for Client<F> where
 
         let uri = match Uri::from_str(&uri) {
             Ok(uri) => uri,
-            Err(err) => return Box::new(futures::done(Err(ApiError(format!("Unable to build URI: {}", err))))),
+            Err(err) => return Err(ApiError(format!("Unable to build URI: {}", err))),
         };
 
         let mut request = hyper::Request::new(hyper::Method::{{#vendorExtensions}}{{{HttpMethod}}}{{/vendorExtensions}}, uri);
@@ -249,7 +257,7 @@ impl<F, C> Api<C> for Client<F> where
 
         let {{{paramName}}}_str = match serde_json::to_string(&param_{{{paramName}}}) {
             Ok(str) => str,
-            Err(e) => return Box::new(futures::done(Err(ApiError(format!("Unable to parse {{{paramName}}} to string: {}", e))))),
+            Err(e) => return Err(ApiError(format!("Unable to parse {{{paramName}}} to string: {}", e))),
         };
 
         let {{{paramName}}}_vec = {{{paramName}}}_str.as_bytes().to_vec();
@@ -284,7 +292,7 @@ impl<F, C> Api<C> for Client<F> where
 
         let mut fields = match multipart.prepare() {
             Ok(fields) => fields,
-            Err(err) => return Box::new(futures::done(Err(ApiError(format!("Unable to build request: {}", err))))),
+            Err(err) => return Err(ApiError(format!("Unable to build request: {}", err))),
         };
 
         let mut body_string = String::new();
@@ -293,7 +301,7 @@ impl<F, C> Api<C> for Client<F> where
 
         let multipart_header = match Mime::from_str(&format!("multipart/form-data;boundary={}", boundary)) {
             Ok(multipart_header) => multipart_header,
-            Err(err) => return Box::new(futures::done(Err(ApiError(format!("Unable to build multipart header: {:?}", err))))),
+            Err(err) => return Err(ApiError(format!("Unable to build multipart header: {:?}", err))),
         };
 
         request.set_body(body_string.into_bytes());
@@ -420,79 +428,73 @@ impl<F, C> Api<C> for Client<F> where
 {{/isMapContainer}}
 {{/headerParams}}
         let mut response = self.client_service.call(request)
-                             .map_err(|e| ApiError(format!("No response received: {}", e))).await
-            match response.status().as_u16() {
+                             .map_err(|e| ApiError(format!("No response received: {}", e))).await;
+        match response.status().as_u16() {
 {{#responses}}
-                {{{code}}} => {
-{{#headers}}                    header! { (Response{{{nameInCamelCase}}}, "{{{baseName}}}") => [{{{datatype}}}] }
-                    let response_{{{name}}} = match response.headers().get::<Response{{{nameInCamelCase}}}>() {
-                        Some(response_{{{name}}}) => response_{{{name}}}.0.clone(),
-                        None => return Box::new(future::err(ApiError(String::from("Required response header {{{baseName}}} for response {{{code}}} was not found.")))) as Box<Future<Item=_, Error=_>>,
-                    };
+            {{{code}}} => {
+{{#headers}}                header! { (Response{{{nameInCamelCase}}}, "{{{baseName}}}") => [{{{datatype}}}] }
+                let response_{{{name}}} = match response.headers().get::<Response{{{nameInCamelCase}}}>() {
+                    Some(response_{{{name}}}) => response_{{{name}}}.0.clone(),
+                    None => return Err(ApiError(String::from("Required response header {{{baseName}}} for response {{{code}}} was not found."))),
+                };
 {{/headers}}
-                    let body = response.body();
+                let body = response.body();
 {{#dataType}}
-                    let body = body
-                        .text()
-                        .await
-                        .map_err(|e| ApiError(format!("Failed to read response: {}", e))).await;
+                let body = body
+                    .text()
+                    .await
+                    .map_err(|e| ApiError(format!("Failed to read response: {}", e))).await;
 {{#vendorExtensions}}
 {{#producesPlainText}}
-                                                 Ok(swagger::ByteArray(body.to_vec()))
+                Ok(swagger::ByteArray(body.to_vec()))
 {{/producesPlainText}}{{^producesPlainText}}
-                        str::from_utf8(&body)
-                                             .map_err(|e| ApiError(format!("Response was not valid UTF8: {}", e)))
-                                             .and_then(|body|
+                let body = str::from_utf8(&body)
+                    .map_err(|e| ApiError(format!("Response was not valid UTF8: {}", e)))?;
 {{#producesXml}}
-                                                 // ToDo: this will move to swagger-rs and become a standard From conversion trait
-                                                 // once https://github.com/RReverser/serde-xml-rs/pull/45 is accepted upstream
-                                                 serde_xml_rs::from_str::<{{{dataType}}}>(body)
-                                                     .map_err(|e| ApiError(format!("Response body did not match the schema: {}", e)))
+                // ToDo: this will move to swagger-rs and become a standard From conversion trait
+                // once https://github.com/RReverser/serde-xml-rs/pull/45 is accepted upstream
+                let body = serde_xml_rs::from_str::<{{{dataType}}}>(body)
+                    .map_err(|e| ApiError(format!("Response body did not match the schema: {}", e)))?;
 {{/producesXml}}{{#producesJson}}
-                                                 serde_json::from_str::<{{{dataType}}}>(body)
-                                                     .map_err(|e| e.into())
+                let body = serde_json::from_str::<{{{dataType}}}>(body)
+                    .map_err(|e| e.into())?;
 {{/producesJson}}
-                                             )
 {{/producesPlainText}}{{/vendorExtensions}}
-                                 )
-                        .map(move |body| {
-                            {{{operationId}}}Response::{{#vendorExtensions}}{{x-responseId}}{{/vendorExtensions}}{{^headers}}(body){{/headers}}{{#headers}}{{#-first}}{ body: body, {{/-first}}{{{name}}}: response_{{{name}}}{{^-last}}, {{/-last}}{{#-last}} }{{/-last}}{{/headers}}
-                        })
+                        {{{operationId}}}Response::{{#vendorExtensions}}{{x-responseId}}{{/vendorExtensions}}{{^headers}}(body){{/headers}}{{#headers}}{{#-first}}{ body: body, {{/-first}}{{{name}}}: response_{{{name}}}{{^-last}}, {{/-last}}{{#-last}} }{{/-last}}{{/headers}}
 {{/dataType}}{{^dataType}}
-                        Ok(
-                            {{{operationId}}}Response::{{#vendorExtensions}}{{x-responseId}}{{/vendorExtensions}}
+                Ok(
+                    {{{operationId}}}Response::{{#vendorExtensions}}{{x-responseId}}{{/vendorExtensions}}
 {{#headers}}
   {{#-first}}
-                            {
+                    {
   {{/-first}}
-                              {{{name}}}: response_{{{name}}},
+                        {{{name}}}: response_{{{name}}},
   {{#-last}}
-                            }
+                    }
   {{/-last}}
 {{/headers}}
-                        )
+                )
 {{/dataType}}
-                    )
-                },
+            },
 {{/responses}}
-                code => {
-                    let headers = response.headers().clone();
-                    let body = response.body()
-                            .take(100)
-                            .concat2()
-                            .await;
-                    Err(ApiError(format!("Unexpected response code {}:\n{:?}\n\n{}",
-                        code,
-                        headers,
-                        match body {
-                            Ok(ref body) => match str::from_utf8(body) {
-                                Ok(body) => Cow::from(body),
-                                Err(e) => Cow::from(format!("<Body was not UTF8: {:?}>", e)),
-                            },
-                            Err(e) => Cow::from(format!("<Failed to read body: {}>", e)),
-                        })))
-                }
+            code => {
+                let headers = response.headers().clone();
+                let body = response.body()
+                        .take(100)
+                        .concat2()
+                        .await;
+                Err(ApiError(format!("Unexpected response code {}:\n{:?}\n\n{}",
+                    code,
+                    headers,
+                    match body {
+                        Ok(ref body) => match str::from_utf8(body) {
+                            Ok(body) => Cow::from(body),
+                            Err(e) => Cow::from(format!("<Body was not UTF8: {:?}>", e)),
+                        },
+                        Err(e) => Cow::from(format!("<Failed to read body: {}>", e)),
+                    })))
             }
+        }
     }
 {{/operation}}{{/operations}}{{/apis}}{{/apiInfo}}
 }

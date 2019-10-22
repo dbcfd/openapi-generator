@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::marker::PhantomData;
-use futures::{future, Stream, stream};
+use futures::{future, FutureExt, Stream, stream, TryStreamExt};
 use hyper;
 use hyper::{Request, Response, Error, StatusCode};
 use hyper::header::{Headers, ContentType};
@@ -31,11 +31,20 @@ pub use swagger::auth::Authorization;
 use swagger::{ApiError, XSpanId, XSpanIdString, Has, RequestParser};
 use swagger::auth::Scopes;
 
-use {Api{{#apiInfo}}{{#apis}}{{#operations}}{{#operation}},
-     {{{operationId}}}Response{{/operation}}{{/operations}}{{/apis}}{{/apiInfo}}
-     };
+use crate::Api;
+use {
+    self
+    {{#apiInfo}}
+    {{#apis}}
+    {{#operations}}
+    {{#operation}},
+    {{{operationId}}}Response{{/operation}}
+    {{/operations}}
+    {{/apis}}
+    {{/apiInfo}}
+};
 #[allow(unused_imports)]
-use models;
+use crate::models;
 
 pub mod context;
 
@@ -113,13 +122,13 @@ where
     type Request = (Request, C);
     type Response = Response;
     type Error = Error;
-    type Future = Pin<Box<Future<Output=Result<Response, Error>>>;
+    type Future = Pin<Box<Future<Output=Result<Self::Response, Error>>>;
 
     fn call(&self, r: Self::Request) -> Self::Future {
         self.do_call(r).boxed()
     }
 
-    async fn do_call(&self, (req, mut context): Self::Request) -> Result<Response, Error> {
+    async fn do_call(&self, (req, mut context): Self::Request) -> Result<Self::Response, Self::Error> {
         let api_impl = self.api_impl.clone();
         let (method, uri, _, headers, body) = req.deconstruct();
         let path = paths::GLOBAL_REGEX_SET.matches(uri.path());
@@ -131,44 +140,42 @@ where
             // {{{operationId}}} - {{{httpMethod}}} {{{path}}}
             &hyper::Method::{{vendorExtensions.HttpMethod}} if path.matched(paths::ID_{{vendorExtensions.PATH_ID}}) => {
 {{#hasAuthMethods}}
-                {
-                    let authorization = match (&context as &Has<Option<Authorization>>).get() {
-                        &Some(ref authorization) => authorization,
-                        &None => return Box::new(future::ok(Response::new()
-                                                .with_status(StatusCode::Forbidden)
-                                                .with_body("Unauthenticated"))),
-                    };
+                let authorization = match (&context as &Has<Option<Authorization>>).get() {
+                    &Some(ref authorization) => authorization,
+                    &None => return Ok(Response::builder()
+                                            .status(StatusCode::Forbidden)
+                                            .body(Body::from("Unauthenticated")).unwrap()),
+                };
 
-                    {{#authMethods}}
-                    {{#isOAuth}}
-                    // Authorization
-                    if let Scopes::Some(ref scopes) = authorization.scopes {
-                        let required_scopes: BTreeSet<String> = vec![
-                            {{#scopes}}
-                            "{{{scope}}}".to_string(), // {{{description}}}
-                            {{/scopes}}
-                        ].into_iter().collect();
+                {{#authMethods}}
+                {{#isOAuth}}
+                // Authorization
+                if let Scopes::Some(ref scopes) = authorization.scopes {
+                    let required_scopes: BTreeSet<String> = vec![
+                        {{#scopes}}
+                        "{{{scope}}}".to_string(), // {{{description}}}
+                        {{/scopes}}
+                    ].into_iter().collect();
 
-                        if !required_scopes.is_subset(scopes) {
-                            let missing_scopes = required_scopes.difference(scopes);
-                            return Box::new(future::ok(Response::new()
-                                .with_status(StatusCode::Forbidden)
-                                .with_body(missing_scopes.fold(
-                                    "Insufficient authorization, missing scopes".to_string(),
-                                    |s, scope| format!("{} {}", s, scope)
-                                ))
-                            ));
-                        }
+                    if !required_scopes.is_subset(scopes) {
+                        let missing_scopes = required_scopes.difference(scopes);
+                        return Ok(Response::builder()
+                            .status(StatusCode::Forbidden)
+                            .body(Body::from(missing_scopes.fold(
+                                "Insufficient authorization, missing scopes".to_string(),
+                                |s, scope| format!("{} {}", s, scope)
+                            )).unwrap()
+                        ));
                     }
-                    {{/isOAuth}}
-                    {{/authMethods}}
                 }
+                {{/isOAuth}}
+                {{/authMethods}}
 {{/hasAuthMethods}}
 {{#vendorExtensions}}
   {{#consumesMultipart}} 
                 let boundary = match multipart_boundary(&headers) {
                     Some(boundary) => boundary.to_string(),
-                    None => return Box::new(future::ok(Response::new().with_status(StatusCode::BadRequest).with_body("Couldn't find valid multipart body"))),
+                    None => return Ok(Response::builder().status(StatusCode::BadRequest).body(Body::from("Couldn't find valid multipart body")).unwrap()),
                 };
   {{/consumesMultipart}}
   {{#hasPathParams}}
@@ -186,9 +193,9 @@ where
                 let param_{{{paramName}}} = match percent_encoding::percent_decode(path_params["{{{baseName}}}"].as_bytes()).decode_utf8() {
                     Ok(param_{{{paramName}}}) => match param_{{{paramName}}}.parse::<{{{dataType}}}>() {
                         Ok(param_{{{paramName}}}) => param_{{{paramName}}},
-                        Err(e) => return Box::new(future::ok(Response::new().with_status(StatusCode::BadRequest).with_body(format!("Couldn't parse path parameter {{{baseName}}}: {:?}", e)))),
+                        Err(e) => return Ok(Response::builder().status(StatusCode::BadRequest).body(Body::from(format!("Couldn't parse path parameter {{{baseName}}}: {:?}", e))).unwrap()),
                     },
-                    Err(_) => return Box::new(future::ok(Response::new().with_status(StatusCode::BadRequest).with_body(format!("Couldn't percent-decode path parameter as UTF-8: {}", &path_params["{{{baseName}}}"]))))
+                    Err(_) => return Ok(Response::builder().status(StatusCode::BadRequest).body(Body::from(format!("Couldn't percent-decode path parameter as UTF-8: {}", &path_params["{{{baseName}}}"]))).unwrap()),
                 };
 {{/pathParams}}
 {{#headerParams}}
@@ -199,7 +206,7 @@ where
   {{#required}}
                 let param_{{{paramName}}} = match headers.get::<Request{{vendorExtensions.typeName}}>() {
                     Some(param_{{{paramName}}}) => param_{{{paramName}}}.0.clone(),
-                    None => return Box::new(future::ok(Response::new().with_status(StatusCode::BadRequest).with_body("Missing or invalid required header {{{baseName}}}"))),
+                    None => return Ok(Response::builder().status(StatusCode::BadRequest).body(Body::from("Missing or invalid required header {{{baseName}}}")).unwrap()),
                 };
   {{/required}}
   {{^required}}
@@ -245,19 +252,21 @@ where
                 // Body parameters (note that non-required body parameters will ignore garbage
                 // values, rather than causing a 400 response). Produce warning header and logs for
                 // any unused fields.
-                let result = body.bytes().await;
+                let body = body.into_body();
+                let result: Result<Vec<_>,_> = body.map(|c| c.to_vec()).try_collect().await;
                 match result {
                     Ok(body) => {
+                        let body = body.into_iter().flat_map(|v| v);
         {{#vendorExtensions}}
           {{^consumesPlainText}}
                         let mut unused_elements = Vec::new();
           {{/consumesPlainText}}
                         let param_{{{paramName}}}: Option<{{{dataType}}}> = if !body.is_empty() {
           {{#consumesXml}}
-                            let deserializer = &mut serde_xml_rs::de::Deserializer::new_from_reader(&*body);
+                            let deserializer = &mut serde_xml_rs::de::Deserializer::new_from_reader(body.as_slice());
           {{/consumesXml}}
           {{#consumesJson}}
-                            let deserializer = &mut serde_json::Deserializer::from_slice(&*body);
+                            let deserializer = &mut serde_json::Deserializer::from_slice(body.as_slice());
           {{/consumesJson}}
           {{^consumesPlainText}}
                             match serde_ignored::deserialize(deserializer, |path| {
@@ -267,9 +276,9 @@ where
                                 Ok(param_{{{paramName}}}) => param_{{{paramName}}},
             {{#required}}
                                 Err(e) => return Ok(
-                                    Response::new()
-                                        .with_status(StatusCode::BadRequest)
-                                        .with_body(format!("Couldn't parse body parameter {{{baseName}}} - doesn't match schema: {}", e))
+                                    Response::builder()
+                                        .status(StatusCode::BadRequest)
+                                        .body(Body::from(format!("Couldn't parse body parameter {{{baseName}}} - doesn't match schema: {}", e)).unwrap())
                                 ),
             {{/required}}
             {{^required}}
@@ -292,9 +301,10 @@ where
         {{#required}}
                         let param_{{{paramName}}} = match param_{{{paramName}}} {
                             Some(param_{{{paramName}}}) => param_{{{paramName}}},
-                            None => return Box::new(future::ok(Response::new().with_status(StatusCode::BadRequest).with_body("Missing required body parameter {{{baseName}}}"))),
+                            None => return Ok(Response::builder().status(StatusCode::BadRequest).body(Body::from("Missing required body parameter {{{baseName}}}")).unwrap()),
                         };
         {{/required}}
+                }
       {{/-first}}
     {{/bodyParams}}
   {{/consumesMultipart}}
@@ -304,16 +314,17 @@ where
                 // Form Body parameters (note that non-required body parameters will ignore garbage
                 // values, rather than causing a 400 response). Produce warning header and logs for
                 // any unused fields.
-                let result = body.bytes().await;
+                let body = body.into_body();
+                let result: Result<Vec<_>,_> = body.map(|c| c.to_vec()).try_collect().await;
                 match result {
                     Ok(body) => {
                         // Read Form Parameters from body
-                        let mut entries = match Multipart::with_body(&body.to_vec()[..], boundary).save().temp() {
+                        let mut entries = match Multipart::with_body(body.as_slice(), boundary).save().temp() {
                             SaveResult::Full(entries) => {
                                 entries
                             },
                             _ => {
-                                return Box::new(future::ok(Response::new().with_status(StatusCode::BadRequest).with_body(format!("Unable to process all message parts"))))
+                                return Ok(Response::builder().status(StatusCode::BadRequest).body(Body::from(format!("Unable to process all message parts"))).unwrap())
                             },
                         };
                     {{#formParams}}{{#-first}}{{/-first}}
@@ -327,9 +338,9 @@ where
                                 swagger::ByteArray({{{paramName}}}_str.as_bytes().to_vec())
                             }
                             None => return Ok(
-                                Response::new()
-                                    .with_status(StatusCode::BadRequest)
-                                    .with_body(format!("Missing required form parameter {{{paramName}}}"))
+                                Response::builder()
+                                    .status(StatusCode::BadRequest)
+                                    .body(Body::from(format!("Missing required form parameter {{{paramName}}}")).unwrap()
                             ),
                         };
                         {{/required}}
@@ -355,15 +366,15 @@ where
                                     Ok(model) => model,
                                     Err(e) => {
                                         return Ok(
-                                            Response::new()
-                                                .with_status(StatusCode::BadRequest)
-                                                .with_body(format!("{{{paramName}}} data does not match API definition: {}", e))
+                                            Response::builder()
+                                                .status(StatusCode::BadRequest)
+                                                .body(Body::from(format!("{{{paramName}}} data does not match API definition: {}", e)).unwrap())
                                         )
                                     }
                                 };
                                 {{{paramName}}}_model
                             }
-                            None => return Ok(Response::new().with_status(StatusCode::BadRequest).with_body(format!("Missing required form parameter {{{paramName}}}"))),
+                            None => return Ok(Response::builder().status(StatusCode::BadRequest).body(format!("Missing required form parameter {{{paramName}}}"))).unwrap()),
                         };
                         {{/required}}
                         {{^required}}
@@ -379,126 +390,121 @@ where
                         {{/required}}
                         {{/jsonSchema}}{{/isByteArray}}
                     {{/formParams}}
-                }
       {{/vendorExtensions}}
     {{/bodyParams}}
   {{/consumesMultipart}}
   {{^consumesMultipart}}
     {{^bodyParams}}
       {{#vendorExtensions}}
-                Box::new({
-                        {{
         {{#formParams}}
           {{#-first}}
-                                // Form parameters
+                        // Form parameters
           {{/-first}}
-                                let param_{{{paramName}}} = {{^isContainer}}{{#vendorExtensions}}{{{example}}};{{/vendorExtensions}}{{/isContainer}}{{#isListContainer}}{{#required}}Vec::new();{{/required}}{{^required}}None;{{/required}}{{/isListContainer}}{{#isMapContainer}}None;{{/isMapContainer}}
+                        let param_{{{paramName}}} = {{^isContainer}}{{#vendorExtensions}}{{{example}}};{{/vendorExtensions}}{{/isContainer}}{{#isListContainer}}{{#required}}Vec::new();{{/required}}{{^required}}None;{{/required}}{{/isListContainer}}{{#isMapContainer}}None;{{/isMapContainer}}
         {{/formParams}}
       {{/vendorExtensions}}
     {{/bodyParams}}
   {{/consumesMultipart}}
 {{/vendorExtensions}}
-                                let result = api_impl.{{#vendorExtensions}}{{{operation_id}}}{{/vendorExtensions}}({{#allParams}}param_{{{paramName}}}{{#isListContainer}}.as_ref(){{/isListContainer}}, {{/allParams}}&context);
-                                let mut response = Response::new();
-                                response.headers_mut().set(XSpanId((&context as &Has<XSpanIdString>).get().0.to_string()));
+                        let result = api_impl.{{#vendorExtensions}}{{{operation_id}}}{{/vendorExtensions}}({{#allParams}}param_{{{paramName}}}{{#isListContainer}}.as_ref(){{/isListContainer}}, {{/allParams}}&context);
+                        let mut response = Response::builder();
+                        response.header(XSpanId((&context as &Has<XSpanIdString>).get().0.to_string()));
 {{#bodyParams}}{{#vendorExtensions}}{{^consumesPlainText}}
-                                if !unused_elements.is_empty() {
-                                    response.headers_mut().set(Warning(format!("Ignoring unknown fields in body: {:?}", unused_elements)));
-                                }
+                        if !unused_elements.is_empty() {
+                            response.header(Warning(format!("Ignoring unknown fields in body: {:?}", unused_elements)));
+                        }
 {{/consumesPlainText}}{{/vendorExtensions}}{{/bodyParams}}
-                                match result {
-                                    Ok(rsp) => match rsp {
+                        let response = match result {
+                            Ok(rsp) => match rsp {
 {{#responses}}
-                                        {{{operationId}}}Response::{{#vendorExtensions}}{{x-responseId}}{{/vendorExtensions}}
+                                {{{operationId}}}Response::{{#vendorExtensions}}{{x-responseId}}{{/vendorExtensions}}
 {{#dataType}}{{^headers}}
-                                        (body)
+                                body
 {{/headers}}{{#headers}}
 {{#-first}}
-                                            {
-                                                body,
+                                body,
 {{/-first}}
-                                                {{{name}}}{{^-last}}, {{/-last}}
+                                {{{name}}}{{^-last}}, {{/-last}}
 {{#-last}}
-                                            }
+                            }
 {{/-last}}
 {{/headers}}{{/dataType}}
 {{^dataType}}{{#headers}}{{#-first}}
-                                            {
+                            {
 {{/-first}}
-                                                {{{name}}}{{^-last}}, {{/-last}}
+                                {{{name}}}{{^-last}}, {{/-last}}
 {{#-last}}
-                                            }
+                            }
 {{/-last}}
 {{/headers}}{{/dataType}}
-                                        => {
-                                            response.set_status(StatusCode::try_from({{{code}}}).unwrap());
+                            => {
+                                response.status(StatusCode::try_from({{{code}}}).unwrap());
 {{#headers}}
-                                            header! { (Response{{{nameInCamelCase}}}, "{{{baseName}}}") => [{{{dataType}}}] }
-                                            response.headers_mut().set(Response{{{nameInCamelCase}}}({{{name}}}));
+                                header! { (Response{{{nameInCamelCase}}}, "{{{baseName}}}") => [{{{dataType}}}] }
+                                response.header(Response{{{nameInCamelCase}}}({{{name}}}));
 {{/headers}}
 {{#produces}}{{#-first}}{{#dataType}}
-                                            response.headers_mut().set(ContentType(mimetypes::responses::{{#vendorExtensions}}{{{uppercase_operation_id}}}_{{x-uppercaseResponseId}}{{/vendorExtensions}}.clone()));
+                                response.header(ContentType(mimetypes::responses::{{#vendorExtensions}}{{{uppercase_operation_id}}}_{{x-uppercaseResponseId}}{{/vendorExtensions}}.clone()));
 {{/dataType}}{{/-first}}{{/produces}}
 {{#dataType}}
 {{#vendorExtensions}}{{#producesXml}}{{^has_namespace}}
-                                            let body = serde_xml_rs::to_string(&body).expect("impossible to fail to serialize");
+                                let body = serde_xml_rs::to_string(&body).expect("impossible to fail to serialize");
 {{/has_namespace}}{{#has_namespace}}
-                                            let mut namespaces = BTreeMap::new();
-                                            // An empty string is used to indicate a global namespace in xmltree.
-                                            namespaces.insert("".to_string(), {{{dataType}}}::NAMESPACE.to_string());
-                                            let body = serde_xml_rs::to_string_with_namespaces(&body, namespaces).expect("impossible to fail to serialize");
+                                let mut namespaces = BTreeMap::new();
+                                // An empty string is used to indicate a global namespace in xmltree.
+                                namespaces.insert("".to_string(), {{{dataType}}}::NAMESPACE.to_string());
+                                let body = serde_xml_rs::to_string_with_namespaces(&body, namespaces).expect("impossible to fail to serialize");
 {{/has_namespace}}{{/producesXml}}{{#producesJson}}
-                                            let body = serde_json::to_string(&body).expect("impossible to fail to serialize");
+                                let body = serde_json::to_string(&body).expect("impossible to fail to serialize");
 {{/producesJson}}{{#producesPlainText}}
-                                            let body = body.0;
+                                let body = body.0;
 {{/producesPlainText}}{{/vendorExtensions}}
-                                            response.set_body(body);
+                                response.body(body).unwrap();
 {{/dataType}}
-                                        },
+                            },
 {{/responses}}
-                                    },
-                                    Err(_) => {
-                                        // Application code returned an error. This should not happen, as the implementation should
-                                        // return a valid response.
-                                        response.set_status(StatusCode::InternalServerError);
-                                        response.set_body("An internal error occurred");
-                                    },
-                                }
+                            },
+                            Err(_) => {
+                                // Application code returned an error. This should not happen, as the implementation should
+                                // return a valid response.
+                                response.status(StatusCode::InternalServerError);
+                                response.body("An internal error occurred");
+                            },
+                        };
 
-                                Ok(response)
-                            }
-                        ))
+                        Ok(response)
+                    }
+                };
 {{#vendorExtensions}}
   {{^consumesMultipart}}
     {{^bodyParams}}
-                        }}
+                        }
+                    }
                 })
     {{/bodyParams}}
   {{/consumesMultipart}}
 {{/vendorExtensions}}
 {{#bodyParams}}
   {{#-first}}
-                        },
-                        Err(e) => Ok(Response::new().with_status(StatusCode::BadRequest).with_body(format!("Couldn't read body parameter {{{baseName}}}: {}", e))),
-                    }
-                })
-            )
+                    },
+                    Err(e) => Ok(Response::builder().status(StatusCode::BadRequest).body(Body::from(format!("Couldn't read body parameter {{{baseName}}}: {}", e))).unwrap()),
+                }
+            }
   {{/-first}}
 {{/bodyParams}}
 {{#vendorExtensions}}
   {{#consumesMultipart}}
     {{^bodyParams}}
-                        },
-                        Err(e) => Ok(Response::new().with_status(StatusCode::BadRequest).with_body(format!("Couldn't read multipart body"))),
-                    }
-                })
-            )
+                    },
+                    Err(e) => Ok(Response::builder().status(StatusCode::BadRequest).body(Body::from(format!("Couldn't read multipart body"))).unwrap()),
+                }
+            }
     {{/bodyParams}}
   {{/consumesMultipart}}
 {{/vendorExtensions}}
             },
 {{/operation}}{{/operations}}{{/apis}}{{/apiInfo}}
-            _ => Ok(Response::new().with_status(StatusCode::NotFound)),
+            _ => Ok(Response::builder().status(StatusCode::NotFound)).body(Body::empty()).unwrap()),
         }
     }
 }

@@ -432,7 +432,7 @@ public class RustClientCodegen extends DefaultCodegen implements CodegenConfig {
             if (HYPER_LIBRARY.equals(getLibrary())) {
                 operation.httpMethod = StringUtils.camelize(operation.httpMethod);
             } else if (REQWEST_LIBRARY.equals(getLibrary())) {
-                operation.httpMethod = operation.httpMethod;
+                operation.httpMethod = operation.httpMethod.toLowerCase(Locale.ROOT);
             }
 
             // update return type to conform to rust standard

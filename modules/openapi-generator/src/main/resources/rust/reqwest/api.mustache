@@ -225,7 +225,7 @@ impl {{{classname}}} for {{{classname}}}Client {
         Ok(())
         {{/returnType}}
         {{#returnType}}
-        Ok(client.execute(req).await?.error_for_status()?.json()?)
+        Ok(client.execute(req).await?.error_for_status()?.json().await?)
         {{/returnType}}
     }
 

@@ -1,6 +1,6 @@
 {{>partial_header}}
 use async_trait::async_trait;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::borrow::Borrow;
 #[allow(unused_imports)]
 use std::option::Option;
@@ -10,11 +10,11 @@ use reqwest;
 use super::{Error, configuration};
 
 pub struct {{{classname}}}Client {
-    configuration: Rc<configuration::Configuration>,
+    configuration: Arc<configuration::Configuration>,
 }
 
 impl {{{classname}}}Client {
-    pub fn new(configuration: Rc<configuration::Configuration>) -> {{{classname}}}Client {
+    pub fn new(configuration: Arc<configuration::Configuration>) -> {{{classname}}}Client {
         {{{classname}}}Client {
             configuration,
         }

@@ -19,7 +19,11 @@ base64 = "0.7"
 futures = "0.3"
 {{/hyper}}
 {{#reqwest}}
-reqwest = { version = "0.10", features = ["json"] }
+bytes = "0.5"
+futures = "0.3"
+reqwest = { version = "0.10", features = ["json", "stream"] }
+tokio = { version = "0.2", default-features = false, features = ["fs"] }
+tokio-util = "0.2"
 {{/reqwest}}
 
 [dev-dependencies]
